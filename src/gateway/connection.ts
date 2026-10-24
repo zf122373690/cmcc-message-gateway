@@ -39,13 +39,26 @@ async function connectInternal(gateway: CmccGateway): Promise<void> {
   // a bare fetch hangs forever and drags the whole /push request with it
   // (the firmware side then sees HTTP -11 read timeouts). 15s covers a
   // normal handshake; timeouts fail fast so the alarm can retry sooner.
-  const response = await fetch(upgradeUrl, {
-    headers: {
-      Upgrade: "websocket",
-      "X-API-Key": gateway.cmccApiKey,
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
+  //
+  // 注意：必须用「可取消」的超时（手动 AbortController + clearTimeout），
+  // 不能用 AbortSignal.timeout()——后者在 15 秒触发时会连带掐断已经建立的
+  // WebSocket 连接，导致每 15 秒重连一次的死循环（2026-10-24 实测）。
+  const controller = new AbortController();
+  const handshakeTimeout = setTimeout(() => controller.abort(), 15_000);
+
+  let response: Response;
+  try {
+    response = await fetch(upgradeUrl, {
+      headers: {
+        Upgrade: "websocket",
+        "X-API-Key": gateway.cmccApiKey,
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    // 握手已完成（或失败），取消超时信号，避免误杀后续建立的连接
+    clearTimeout(handshakeTimeout);
+  }
 
   const ws = response.webSocket;
   if (!ws) {

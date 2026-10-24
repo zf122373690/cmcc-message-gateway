@@ -64,15 +64,11 @@ async function health(env: Bindings): Promise<Response> {
     const response = await getStub(env).fetch(
       new Request("https://cmcc.internal/health"),
     );
-    const detail = (await response.json()) as Record<string, unknown>;
-
-    return json({
-      ok: true,
-      service: "cmcc-message-gateway",
-      connected: Boolean(detail.connected),
-      authenticated: Boolean(detail.authenticated),
-      hasRecipient: Boolean(detail.hasRecipient),
-      timestamp: Date.now(),
+    // 直接透传 DO 的完整状态（含 lastError/lastDisconnectAt/lastPongAt/lastNotice），
+    // 便于诊断连接稳定性问题（如重连循环）
+    return new Response(response.body, {
+      status: response.status,
+      headers: response.headers,
     });
   } catch (error) {
     return json(
