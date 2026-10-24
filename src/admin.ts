@@ -79,7 +79,7 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
         path: "/",
         maxAge: SESSION_MAX_AGE,
       });
-      return json({ ok: true });
+      return c.json({ ok: true });
     } catch (error) {
       return json(
         { ok: false, message: error instanceof Error ? error.message : "登录失败" },
@@ -101,7 +101,7 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
       httpOnly: true,
       sameSite: "Lax",
     });
-    return json({ ok: true });
+    return c.json({ ok: true });
   });
 
   app.get("/api/settings", async (c) => {
@@ -190,7 +190,7 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
         httpOnly: true,
         sameSite: "Lax",
       });
-      return json({ ok: true });
+      return c.json({ ok: true });
     } catch (error) {
       return json(
         { ok: false, message: error instanceof Error ? error.message : "更新失败" },
