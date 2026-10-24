@@ -62,6 +62,34 @@ interface AmrWasmModule {
   HEAPF32: Float32Array;
 }
 
+/**
+ * 模块级缓存：emscripten glue + WASM 实例化代价高（线上实测每次请求数秒），
+ * 每个 isolate 只做一次，后续请求复用。实例化失败时清掉缓存允许重试。
+ */
+let amrModulePromise: Promise<AmrWasmModule> | null = null;
+
+function getAmrModule(): Promise<AmrWasmModule> {
+  if (!amrModulePromise) {
+    amrModulePromise = (createAMR({
+      instantiateWasm: (
+        imports: Record<string, unknown>,
+        receiveInstance: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
+      ) => {
+        const instance = new WebAssembly.Instance(
+          amrWasmModule,
+          imports as WebAssembly.Imports,
+        );
+        receiveInstance(instance, amrWasmModule);
+        return instance.exports;
+      },
+    }) as Promise<AmrWasmModule>).catch((error) => {
+      amrModulePromise = null;
+      throw error;
+    });
+  }
+  return amrModulePromise;
+}
+
 /** AMR-NB 帧长（含 1 字节头），按 mode 0-15 索引 */
 const NB_SIZES = [13, 14, 16, 18, 20, 21, 27, 32, 6, 6, 6, 6, 1, 1, 1, 1];
 /** AMR-WB 帧长（含 1 字节头），按 mode 0-15 索引 */
@@ -75,7 +103,7 @@ interface DecodedAudio {
 }
 
 /**
- * 用预编译 WASM 实例化 glue，返回 AMR 解码器。
+ * 用（缓存的）预编译 WASM 实例化 glue，返回 AMR 解码器。
  * 移植自 @audio/decode-amr 的 AMRDecoder（Apache-2.0）。
  */
 async function createAmrDecoder(): Promise<{
@@ -83,20 +111,7 @@ async function createAmrDecoder(): Promise<{
   flush(): DecodedAudio;
   free(): void;
 }> {
-  const mod = (await createAMR({
-    instantiateWasm: (
-      imports: Record<string, unknown>,
-      receiveInstance: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
-    ) => {
-      const instance = new WebAssembly.Instance(
-        amrWasmModule,
-        imports as WebAssembly.Imports,
-      );
-      receiveInstance(instance, amrWasmModule);
-      return instance.exports;
-    },
-  })) as AmrWasmModule;
-
+  const mod = await getAmrModule();
   return new AmrDecoder(mod);
 }
 

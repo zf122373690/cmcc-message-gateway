@@ -14,6 +14,7 @@ import type { InboundMessage } from "../message-format.js";
 import { inferMediaType, inferMediaTypeFromUrl } from "../message-format.js";
 import { ensureConnected, resetConnection } from "./connection.js";
 import { sendMedia, sendText, uploadMedia } from "./outbound.js";
+import { queuePendingMedia, shouldQueueLongMedia } from "./pending-media.js";
 import { transcodeAmrFile } from "../media/transcode.js";
 import type { Recipient } from "./recipients.js";
 import {
@@ -530,6 +531,40 @@ async function handleMediaUpload(
   }
 
   const recipient = await requireRecipient(gateway, form.get("to"));
+  const content = String(form.get("content") || "");
+
+  // 长录音（>~60s AMR）：入队后立即返回 200，转码+上传+发送交给 DO alarm
+  // 后台执行。前台请求 CPU 超限（Cloudflare 30s/req）会直接杀掉 isolate，
+  // 把 T3 的上传请求一起搞失败；alarm 是独立执行上下文，有独立 CPU 预算。
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (shouldQueueLongMedia(bytes, file.name)) {
+      const queued = await queuePendingMedia(gateway, {
+        to: recipient.id,
+        content,
+        file,
+        bytes,
+      });
+      if (queued) {
+        return json({
+          code: 200,
+          message: "queued",
+          timestamp: Date.now(),
+          data: {
+            messageId: null,
+            status: "queued",
+            to: recipient.id,
+            recipientSource: recipient.source,
+            queuedBytes: bytes.length,
+            note: "长录音已入队，转码后经后台通道异步发送",
+          },
+        });
+      }
+      // 已有任务在处理中：当前文件退回内联处理（罕见）
+    }
+  } catch {
+    // 预读失败不影响主流程，内联路径会自行报错
+  }
 
   // AMR 录音（T3 来电录音等）平台按内容识别为非音频，会渲染成文件卡片；
   // 先转码为 MP3（8kHz 单声道）再上传，使其呈现为语音气泡。

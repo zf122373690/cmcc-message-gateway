@@ -12,6 +12,7 @@ import type { Bindings } from "./env.js";
 import type { GatewayConfig } from "./config.js";
 import { ensureConnected } from "./gateway/connection.js";
 import { createGatewayApp } from "./gateway/router.js";
+import { processPendingMedia } from "./gateway/pending-media.js";
 import { errorMessage } from "./http.js";
 
 export class CmccGateway extends DurableObject<Bindings> {
@@ -146,8 +147,14 @@ export class CmccGateway extends DurableObject<Bindings> {
       await this.state.storage.deleteAll();
       return;
     }
+    // 先保活/重连，再处理后台长录音任务（发送需要 WS 在线）
     try {
       await ensureConnected(this);
+    } catch (error) {
+      this.lastError = errorMessage(error);
+    }
+    try {
+      await processPendingMedia(this);
     } catch (error) {
       this.lastError = errorMessage(error);
     } finally {
