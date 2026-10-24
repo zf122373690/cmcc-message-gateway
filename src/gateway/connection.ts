@@ -50,6 +50,7 @@ async function connectInternal(gateway: CmccGateway): Promise<void> {
   ws.accept();
   gateway.ws = ws;
   gateway.authenticated = false;
+  gateway.connectedApiKey = gateway.cmccApiKey;
   gateway.lastConnectAt = Date.now();
   gateway.lastPongAt = Date.now();
 
@@ -151,6 +152,23 @@ function cleanupSocket(gateway: CmccGateway, close = true): void {
 
   gateway.ws = null;
   gateway.authenticated = false;
+  gateway.connectedApiKey = null;
+}
+
+/**
+ * 强制断开当前连接（配置中的 API Key 变更后，旧连接是用旧 Key 建的，
+ * ensureConnected 看到“已连接已认证”会直接返回，导致新 Key 不生效，
+ * 所以这里先断开再重连）。若已有连接在进行中，会等它结束后再清理。
+ */
+export async function resetConnection(gateway: CmccGateway): Promise<void> {
+  if (gateway.connectPromise) {
+    try {
+      await gateway.connectPromise;
+    } catch {
+      // 连接失败也要继续清理
+    }
+  }
+  cleanupSocket(gateway, true);
 }
 
 function handleWebSocketClose(

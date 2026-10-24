@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 
 import type { CmccGateway } from "../cmcc-gateway.js";
+import type { GatewayConfig } from "../config.js";
 import {
   INBOX_KEY,
   LAST_FRAME_KEY,
@@ -10,7 +11,7 @@ import {
 import { decodePathPart, errorMessage, json, readJson } from "../http.js";
 import type { InboundMessage } from "../message-format.js";
 import { inferMediaType } from "../message-format.js";
-import { ensureConnected } from "./connection.js";
+import { ensureConnected, resetConnection } from "./connection.js";
 import { sendMedia, sendText, uploadMedia } from "./outbound.js";
 import type { Recipient } from "./recipients.js";
 import {
@@ -36,16 +37,50 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
     });
   });
 
-  // 后台保存配置后调用：强制重载 KV 配置并重新对接
-  app.all("/reload-config", async () => {
-    gateway.configLoadedAt = 0;
-    await gateway.loadConfig();
-    await ensureConnected(gateway);
+  // 后台保存配置后调用：应用新配置并重新对接。
+  // - 可带 JSON body { config }：网页刚保存的完整配置，直接应用（绕开 KV 最终一致延迟）
+  // - 重连失败不再抛异常：保存本身已成功，返回 connectError 由前端提示即可
+  app.all("/reload-config", async (context) => {
+    let pushed: GatewayConfig | null = null;
+    if (context.req.method === "POST") {
+      try {
+        const body = (await context.req.json()) as {
+          config?: GatewayConfig;
+        } | null;
+        if (body && typeof body.config === "object" && body.config) {
+          pushed = body.config;
+        }
+      } catch {
+        // 允许空 body，回退到从 KV 重读
+      }
+    }
+
+    if (pushed) {
+      gateway.applyConfig(pushed);
+    } else {
+      gateway.configLoadedAt = 0;
+      await gateway.loadConfig();
+    }
+
+    // K 变了：旧连接是用旧 Key 建的，必须先断开重连，否则新 Key 不生效
+    if (gateway.connectedApiKey !== gateway.cmccApiKey) {
+      await resetConnection(gateway);
+    }
+
+    let connectError: string | null = null;
+    try {
+      await ensureConnected(gateway);
+    } catch (error) {
+      connectError = errorMessage(error);
+      gateway.lastError = connectError;
+    }
+
     return json({
       ok: true,
       connected: gateway.isOpen(),
       authenticated: gateway.authenticated,
       hasApiKey: Boolean(gateway.cmccApiKey),
+      connectError,
       timestamp: Date.now(),
     });
   });

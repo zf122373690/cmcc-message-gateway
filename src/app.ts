@@ -17,6 +17,7 @@ const ADMIN_PATHS = [
   "/api/connect",
   "/api/password",
   "/api/status",
+  "/api/test-send",
 ];
 
 function isAdminPath(path: string): boolean {

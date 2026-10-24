@@ -145,12 +145,23 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
         apiToken: body.apiToken,
         defaultRecipient: body.defaultRecipient,
       });
-      // 立即让 Durable Object 重新加载配置并对接
-      const r = await doFetch(c.env, "/reload-config");
-      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      // 立即让 Durable Object 应用新配置并重连。
+      // 注意：KV 是最终一致，刚写入立刻读可能还是旧值，所以把完整配置直接推给 DO。
+      // 重连失败（如平台握手失败）不影响“已保存”——配置已落库，连接会自动重试。
+      let reloaded = false;
+      let connectError: string | null = null;
+      try {
+        const r = await doFetch(c.env, "/reload-config", { config: next });
+        const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+        reloaded = Boolean(j.ok);
+        connectError = (j.connectError as string) || null;
+      } catch (error) {
+        connectError = errorMessage(error);
+      }
       return json({
         ok: true,
-        reloaded: Boolean(j.ok),
+        reloaded,
+        connectError,
         hasApiKey: Boolean(next.cmccApiKey),
       });
     } catch (error) {

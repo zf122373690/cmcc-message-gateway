@@ -29,6 +29,8 @@ export class CmccGateway extends DurableObject<Bindings> {
   lastError: string | null = null;
   // 平台最近推送的通知/回执文本（如“设备暂未在线”等），用于对接诊断展示
   lastNotice: { text: string; at: number } | null = null;
+  // 当前 WebSocket 连接是用哪个 API Key 建立的（K 变更后需要重连才生效）
+  connectedApiKey: string | null = null;
 
   // 来自 KV 的配置（网页后台可改），环境变量作为兜底
   config: GatewayConfig = {};
@@ -63,6 +65,23 @@ export class CmccGateway extends DurableObject<Bindings> {
     } catch {
       this.config = {};
     }
+    this.configLoadedAt = Date.now();
+    this.configLoaded = true;
+  }
+
+  /**
+   * 直接应用网页后台刚保存的配置（不走 KV 读取）。
+   * Cloudflare KV 是最终一致：保存后立刻读很可能还是旧值，
+   * 所以由调用方把完整配置推进来，立即生效。
+   */
+  applyConfig(pushed: GatewayConfig): void {
+    const next: GatewayConfig = {};
+    for (const key of Object.keys(pushed) as (keyof GatewayConfig)[]) {
+      const value = pushed[key];
+      if (value === undefined || value === null) continue;
+      (next as Record<string, string>)[key] = String(value).trim();
+    }
+    this.config = next;
     this.configLoadedAt = Date.now();
     this.configLoaded = true;
   }

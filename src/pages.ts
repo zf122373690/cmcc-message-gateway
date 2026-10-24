@@ -218,11 +218,19 @@ export function adminPageHtml(): string {
 
   $('save').onclick=async()=>{
     const body={ cmccApiKey:$('cmccApiKey').value.trim(), apiToken:$('apiToken').value.trim(), defaultRecipient:$('defaultRecipient').value.trim() };
-    show($('msg_save'),'保存中…');
+    show($('msg_save'),'保存中（保存后会立即重连，最多约 10 秒）…');
     try{
       const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const j=await r.json();
-      if(j.ok){ show($('msg_save'),'已保存并重新对接','ok'); $('cmccApiKey').value=''; $('apiToken').value=''; $('defaultRecipient').value=''; load(); setTimeout(status,1500); }
+      if(j.ok){
+        $('cmccApiKey').value=''; $('apiToken').value=''; $('defaultRecipient').value='';
+        if(j.connectError){
+          show($('msg_save'),'已保存 ✅\n⚠ 但重新对接失败：'+j.connectError+'\n（配置已生效，连接会自动重试；也可点上方“一键对接”手动重试）','ok');
+        }else{
+          show($('msg_save'),'已保存并重新对接 ✅','ok');
+        }
+        load(); setTimeout(status,1500);
+      }
       else show($('msg_save'), j.message||'保存失败','err');
     }catch(e){ show($('msg_save'),'保存失败：网络错误','err'); }
   };
