@@ -4,9 +4,10 @@ import type { Bindings, HonoEnv } from "./env.js";
 import { json, publicAuthorized } from "./http.js";
 import { loadConfigKV } from "./config.js";
 import { registerAdminRoutes, requireSession } from "./admin.js";
+import { DO_NAME } from "./constants.js";
 
 function getStub(env: Bindings): DurableObjectStub {
-  const id = env.CMCC_GATEWAY.idFromName("default");
+  const id = env.CMCC_GATEWAY.idFromName(DO_NAME);
   // Pin the DO to an Asia-Pacific colo. The default placement landed the
   // gateway DO overseas, so requests from China intermittently stalled
   // before even reaching it. Only takes effect when the DO is (re)created.

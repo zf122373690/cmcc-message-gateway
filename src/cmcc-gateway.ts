@@ -5,6 +5,7 @@ import {
   DEFAULT_CMCC_SERVER,
   DEFAULT_CMCC_UPLOAD,
   DEFAULT_CMCC_VERSION,
+  LEGACY_DO_NAMES,
   RECENT_FRAMES_KEY,
 } from "./constants.js";
 import type { Bindings } from "./env.js";
@@ -133,12 +134,37 @@ export class CmccGateway extends DurableObject<Bindings> {
   }
 
   async alarm(): Promise<void> {
+    // 旧名 DO（如 "default"）的自清理：DO 改名强制重建到亚太机房后，
+    // 旧实例的 alarm 仍会每 5 分钟唤醒并抢平台 WS 连接。发现自己是
+    // legacy 名就删光存储（含 alarm）并不再续期，之后永远不再被唤醒。
+    if (this.isLegacyName()) {
+      try {
+        this.ws?.close(1000, "legacy-do-retired");
+      } catch {
+        // ignore
+      }
+      await this.state.storage.deleteAll();
+      return;
+    }
     try {
       await ensureConnected(this);
     } catch (error) {
       this.lastError = errorMessage(error);
     } finally {
       await this.state.storage.setAlarm(Date.now() + 5 * 60_000);
+    }
+  }
+
+  /** 本实例是否为历史名（DO 改名重建前的旧实例） */
+  private isLegacyName(): boolean {
+    if (LEGACY_DO_NAMES.length === 0) return false;
+    try {
+      const myId = this.state.id.toString();
+      return LEGACY_DO_NAMES.some(
+        (name) => this.bindings.CMCC_GATEWAY.idFromName(name).toString() === myId,
+      );
+    } catch {
+      return false;
     }
   }
 }

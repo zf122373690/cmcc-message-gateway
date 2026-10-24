@@ -1,5 +1,6 @@
 import { app } from "./app.js";
 import type { Bindings } from "./env.js";
+import { DO_NAME } from "./constants.js";
 
 export { CmccGateway } from "./cmcc-gateway.js";
 
@@ -12,7 +13,7 @@ export default {
     env: Bindings,
     ctx: ExecutionContext,
   ): void {
-    const id = env.CMCC_GATEWAY.idFromName("default");
+    const id = env.CMCC_GATEWAY.idFromName(DO_NAME);
     const stub = env.CMCC_GATEWAY.get(id, { locationHint: "apac" });
     ctx.waitUntil(
       stub.fetch(new Request("https://cmcc.internal/connect")).then(() => {}),

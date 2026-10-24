@@ -14,6 +14,7 @@ import type { InboundMessage } from "../message-format.js";
 import { inferMediaType, inferMediaTypeFromUrl } from "../message-format.js";
 import { ensureConnected, resetConnection } from "./connection.js";
 import { sendMedia, sendText, uploadMedia } from "./outbound.js";
+import { transcodeAmrFile } from "../media/transcode.js";
 import type { Recipient } from "./recipients.js";
 import {
   getFallbackRecipient,
@@ -111,6 +112,57 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
       ok: true,
       frame: (await gateway.state.storage.get(LAST_FRAME_KEY)) || null,
       frames: stored.slice(-10),
+    });
+  });
+
+  // 探测 DO 所在机房：DO 出网请求 cloudflare.com/cdn-cgi/trace，返回的 colo
+  // 即 DO 所在 colo（用于验证 locationHint: "apac" 是否生效）。
+  app.all("/api/debug/colo", async () => {
+    let colo: string | null = null;
+    let traceError: string | null = null;
+    try {
+      const res = await fetch("https://cloudflare.com/cdn-cgi/trace");
+      const text = await res.text();
+      const m = text.match(/^colo=(\S+)$/m);
+      colo = m ? m[1] : null;
+    } catch (error) {
+      traceError = errorMessage(error);
+    }
+    return json({
+      ok: true,
+      colo,
+      traceError,
+    });
+  });
+
+  // 转码基准端点：只转码不上传，用于定位长音频失败阶段。
+  // workerd 中 Date.now()/performance.now() 在纯 CPU 段冻结，故在转码后
+  // 先 yield 一次（setTimeout 0）再读时钟，差值即真实 CPU 段耗时。
+  app.all("/api/debug/transcode-test", async (context) => {
+    const request = context.req.raw;
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.includes("multipart/form-data")) {
+      return json({ ok: false, message: "需要 multipart/form-data" }, 400);
+    }
+    const form = await request.formData();
+    const file = form.get("file") || form.get("media");
+    if (!(file instanceof File)) {
+      return json({ ok: false, message: "缺少文件字段" }, 400);
+    }
+    const t0 = Date.now();
+    const result = await transcodeAmrFile(file);
+    // yield 一次让冻结的时钟前进
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    const t1 = Date.now();
+    return json({
+      ok: true,
+      inputBytes: file.size,
+      amrDetected: result.amrDetected,
+      transcoded: result.transcoded,
+      reason: result.reason ?? null,
+      outputBytes: result.file.size,
+      outputName: result.file.name,
+      ms: t1 - t0,
     });
   });
 
@@ -458,7 +510,11 @@ async function handleMediaUpload(
   gateway: CmccGateway,
   request: Request,
 ): Promise<Response> {
+  // 注意：workerd 中 Date.now() 在纯 CPU 执行段是冻结的（仅跨 I/O 前进），
+  // 测 CPU 密集的转码耗时必须用 performance.now()。
+  const p0 = performance.now();
   const form = await request.formData();
+  const p1 = performance.now();
   // 文件字段兼容：file（curl/网页用法）与 media（T3 来电录音上传用法，
   // T3 固定发 filename="record.amr"、Content-Type: application/octet-stream、不带 header）
   const file = form.get("file") || form.get("media");
@@ -474,13 +530,28 @@ async function handleMediaUpload(
   }
 
   const recipient = await requireRecipient(gateway, form.get("to"));
-  const uploaded = await uploadMedia(gateway, file);
+
+  // AMR 录音（T3 来电录音等）平台按内容识别为非音频，会渲染成文件卡片；
+  // 先转码为 MP3（8kHz 单声道）再上传，使其呈现为语音气泡。
+  // 转码失败时回退原文件，不影响推送本身。
+  const t0 = performance.now();
+  const transcode = await transcodeAmrFile(file);
+  const t1 = performance.now();
+  if (transcode.amrDetected && !transcode.transcoded) {
+    // 转码失败留痕，便于 /api/status 排查（不影响推送，仍按原文件发）
+    gateway.lastError = `AMR transcode failed (${file.size}B): ${transcode.reason ?? "unknown"}`;
+  }
+  const uploadFile = transcode.file;
+  const uploaded = await uploadMedia(gateway, uploadFile);
+  const t2 = performance.now();
 
   // 媒体类型：表单显式指定 > 文件 MIME > 文件扩展名（浏览器对 .amr 等可能不给 MIME）
   let mediaType = String(form.get("mediaType") || "").trim();
   if (!mediaType) {
-    mediaType = inferMediaType(file.type);
-    if (mediaType === "FILE") mediaType = inferMediaTypeFromUrl(file.name || "");
+    mediaType = inferMediaType(uploadFile.type);
+    if (mediaType === "FILE") {
+      mediaType = inferMediaTypeFromUrl(uploadFile.name || "");
+    }
   }
 
   const result = await sendMedia(gateway, {
@@ -488,13 +559,25 @@ async function handleMediaUpload(
     mediaType,
     content: String(form.get("content") || ""),
     mediaUrl: uploaded.mediaUrl,
-    mediaFileName: file.name,
-    mediaSize: file.size,
-    mediaMimeType: file.type || undefined,
+    mediaFileName: uploadFile.name,
+    mediaSize: uploadFile.size,
+    mediaMimeType: uploadFile.type || undefined,
   });
+  const t3 = performance.now();
 
   return successResponse(result.messageId, recipient, {
     mediaUrl: uploaded.mediaUrl,
+    // 转码诊断：AMR 输入是否成功转为 MP3（失败时 reason 带原因，仍按原文件推送）
+    transcoded: transcode.transcoded,
+    timings: {
+      parseMs: Math.round(p1 - p0),
+      transcodeMs: Math.round(t1 - t0),
+      uploadMs: Math.round(t2 - t1),
+      sendMs: Math.round(t3 - t2),
+    },
+    ...(transcode.amrDetected && !transcode.transcoded
+      ? { transcodeError: transcode.reason ?? "unknown" }
+      : {}),
   });
 }
 

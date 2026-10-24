@@ -21,11 +21,13 @@ import {
   updatePassword,
   verifyPassword,
 } from "./auth.js";
+import { DO_NAME } from "./constants.js";
 import { adminPageHtml, loginPageHtml } from "./pages.js";
 
 function getStub(env: Bindings) {
-  const id = env.CMCC_GATEWAY.idFromName("default");
-  return env.CMCC_GATEWAY.get(id);
+  const id = env.CMCC_GATEWAY.idFromName(DO_NAME);
+  // 与 app.ts 保持一致：亚太机房（仅 DO 创建/重建时生效）
+  return env.CMCC_GATEWAY.get(id, { locationHint: "apac" });
 }
 
 async function doFetch(

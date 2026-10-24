@@ -35,5 +35,12 @@
 
   "triggers": {
     "crons": ["*/5 * * * *"]
-  }
+  },
+
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": ["**/*.wasm"]
+    }
+  ]
 }
