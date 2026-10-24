@@ -453,13 +453,15 @@ async function handleMediaUpload(
   request: Request,
 ): Promise<Response> {
   const form = await request.formData();
-  const file = form.get("file");
+  // 文件字段兼容：file（curl/网页用法）与 media（T3 来电录音上传用法，
+  // T3 固定发 filename="record.amr"、Content-Type: application/octet-stream、不带 header）
+  const file = form.get("file") || form.get("media");
 
   if (!(file instanceof File)) {
     return json(
       {
         code: 400,
-        message: "multipart/form-data 中缺少 file",
+        message: "multipart/form-data 中缺少文件字段（file 或 media）",
       },
       400,
     );

@@ -228,6 +228,24 @@ curl -X POST 'https://YOUR_DOMAIN/api/media/send' \
 
 发送接口返回的 `status: "ws_written"` 表示消息已写入 WebSocket，不等同于手机端已经送达或已读。
 
+### T3 设备对接（短信文本 + 来电录音语音，零改动）
+
+T3 固件的「自定义 Webhook」通道同时承担两路，互不影响：
+
+**① 短信文本（POST）**——在 T3「推送设置 → 自定义」通道填写：
+
+- URL：`https://YOUR_DOMAIN/push`
+- 密钥1（key1）：设备接入令牌（T3 会以 `Authorization: Bearer` 发送）
+- 自定义消息体：`{{短信内容}}`（纯文本，无需 JSON）
+
+**② 来电录音语音（AMR，multipart）**——在**同一个**自定义 Webhook 通道内：
+
+- 打开「录音上传」开关
+- 录音上传地址：`https://YOUR_DOMAIN/push?token=设备接入令牌`
+
+> 录音上传地址必须带 `?token=`：T3 的录音上传是裸 multipart POST（字段名 `media`、文件名 `record.amr`），不发送任何鉴权 header，只能靠查询参数鉴权。
+> 上传成功后由本 Worker 转存中国移动媒体服务，再以 `AUDIO` 语音消息发给默认接收人（首次需先在手机「新消息 ClawBot」发一条消息以记录默认接收人）。
+
 ## 接收入站消息
 
 查看 Worker 保存的入站消息，`limit` 范围为 1～100：
