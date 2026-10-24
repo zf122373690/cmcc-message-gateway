@@ -13,6 +13,13 @@
     ]
   },
 
+  "kv_namespaces": [
+    {
+      "binding": "CONFIG",
+      "id": "4f2e94e9b3f94c0b84bf10b3034b8dcb"
+    }
+  ],
+
   "exports": {
     "CmccGateway": {
       "type": "durable-object",
@@ -24,5 +31,9 @@
     "CMCC_SERVER_URL": "wss://5gvas01.cmicmaap.com/gtw-ai/openclaw/ws/msg",
     "CMCC_UPLOAD_URL": "https://5gvas01.cmicmaap.com/gtw-ai/openclaw/api",
     "CMCC_VERSION": "2.0"
+  },
+
+  "triggers": {
+    "crons": ["*/5 * * * *"]
   }
 }

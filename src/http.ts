@@ -1,5 +1,3 @@
-import type { Bindings } from "./env.js";
-
 export function json(
   data: unknown,
   status = 200,
@@ -44,6 +42,9 @@ function getAuthToken(request: Request): string {
   const apiKey = request.headers.get("x-api-key");
   if (apiKey) return apiKey.trim();
 
+  const deviceToken = request.headers.get("x-device-token");
+  if (deviceToken) return deviceToken.trim();
+
   const url = new URL(request.url);
   return (
     url.searchParams.get("token") ||
@@ -52,7 +53,7 @@ function getAuthToken(request: Request): string {
   ).trim();
 }
 
-export function publicAuthorized(request: Request, env: Bindings): boolean {
-  if (!env.API_TOKEN) return false;
-  return getAuthToken(request) === env.API_TOKEN;
+export function publicAuthorized(request: Request, token: string): boolean {
+  if (!token) return false;
+  return getAuthToken(request) === token;
 }

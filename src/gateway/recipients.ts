@@ -12,7 +12,7 @@ export interface Recipient {
 }
 
 export function getFallbackRecipient(gateway: CmccGateway): Recipient | null {
-  const id = String(gateway.bindings.DEFAULT_RECIPIENT || "").trim();
+  const id = gateway.defaultRecipient;
   if (!id) return null;
 
   return {

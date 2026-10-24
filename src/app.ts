@@ -1,45 +1,58 @@
 import { Hono } from "hono";
 
 import type { Bindings, HonoEnv } from "./env.js";
-import { errorMessage, json, publicAuthorized } from "./http.js";
+import { json, publicAuthorized } from "./http.js";
+import { loadConfigKV } from "./config.js";
+import { registerAdminRoutes, requireSession } from "./admin.js";
 
 function getStub(env: Bindings): DurableObjectStub {
   const id = env.CMCC_GATEWAY.idFromName("default");
   return env.CMCC_GATEWAY.get(id);
 }
 
+const ADMIN_PATHS = [
+  "/admin",
+  "/logout",
+  "/api/settings",
+  "/api/connect",
+  "/api/password",
+  "/api/status",
+];
+
+function isAdminPath(path: string): boolean {
+  return ADMIN_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+async function resolveApiToken(env: Bindings): Promise<string> {
+  const cfg = await loadConfigKV(env.CONFIG);
+  return (cfg.apiToken || env.API_TOKEN || "").trim();
+}
+
 export const app = new Hono<HonoEnv>();
 
+// 路由鉴权：公开(健康/登录) → 会话鉴权(后台) → 设备令牌(API_TOKEN)转发给 DO
 app.use("*", async (context, next) => {
   const path = context.req.path;
-  if (path === "/" || path === "/health") {
-    await next();
-    return;
+
+  if (path === "/" || path === "/health" || path === "/login") {
+    return next();
   }
 
-  if (!context.env.API_TOKEN) {
-    return json(
-      {
-        ok: false,
-        code: 500,
-        message: "API_TOKEN Secret 未配置",
-      },
-      500,
-    );
+  if (isAdminPath(path)) {
+    if (!(await requireSession(context))) {
+      if (path.startsWith("/api/")) {
+        return json({ ok: false, message: "未登录" }, 401);
+      }
+      return context.redirect("/login");
+    }
+    return next();
   }
 
-  if (!publicAuthorized(context.req.raw, context.env)) {
-    return json(
-      {
-        ok: false,
-        code: 401,
-        message: "Unauthorized",
-      },
-      401,
-    );
+  const token = await resolveApiToken(context.env);
+  if (!token || !publicAuthorized(context.req.raw, token)) {
+    return json({ ok: false, code: 401, message: "Unauthorized" }, 401);
   }
-
-  await next();
+  return next();
 });
 
 async function health(env: Bindings): Promise<Response> {
@@ -65,7 +78,7 @@ async function health(env: Bindings): Promise<Response> {
         connected: false,
         authenticated: false,
         hasRecipient: false,
-        error: errorMessage(error),
+        error: error instanceof Error ? error.message : String(error),
         timestamp: Date.now(),
       },
       503,
@@ -76,5 +89,7 @@ async function health(env: Bindings): Promise<Response> {
 app.get("/", (context) => health(context.env));
 app.get("/health", (context) => health(context.env));
 
-// 鉴权完成后，其余请求原样转发给唯一的 Durable Object。
+registerAdminRoutes(app);
+
+// 其余请求（设备 API：/push、/connect、/api/messages/* 等）原样转发给 Durable Object
 app.all("*", (context) => getStub(context.env).fetch(context.req.raw));

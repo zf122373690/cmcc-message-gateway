@@ -3,8 +3,10 @@ import { errorMessage } from "../http.js";
 import { handleWebSocketMessage } from "./inbound.js";
 
 export async function ensureConnected(gateway: CmccGateway): Promise<void> {
+  await gateway.loadConfig();
+
   if (!gateway.cmccApiKey) {
-    throw new Error("CMCC_API_KEY Secret 未配置");
+    throw new Error("CMCC_API_KEY 未配置（请在后台“渠道配置”填写中国移动 API Key）");
   }
 
   if (gateway.isOpen() && gateway.authenticated) {

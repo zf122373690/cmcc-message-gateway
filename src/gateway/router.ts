@@ -36,6 +36,20 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
     });
   });
 
+  // 后台保存配置后调用：强制重载 KV 配置并重新对接
+  app.all("/reload-config", async () => {
+    gateway.configLoadedAt = 0;
+    await gateway.loadConfig();
+    await ensureConnected(gateway);
+    return json({
+      ok: true,
+      connected: gateway.isOpen(),
+      authenticated: gateway.authenticated,
+      hasApiKey: Boolean(gateway.cmccApiKey),
+      timestamp: Date.now(),
+    });
+  });
+
   app.all("/api/recipient", async () => {
     const stored = await gateway.state.storage.get<Recipient>(RECIPIENT_KEY);
     const fallback = getFallbackRecipient(gateway);
@@ -59,13 +73,34 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
     }),
   );
 
+  // 兼容 T3 Lite 固件“自定义 Webhook”的原生提交方式：
+  // - JSON 模式（customBody 以 JSON: 开头）：body 为合法 JSON，按 title/body 解析
+  // - 纯文本模式（customBody 为普通文本）：固件把 Content-Type 仍标成
+  //   application/json，但 body 是纯文本（含 T3 默认模板的“号码:/来源:/【设备】”等），
+  //   这里解析失败就回退成纯文本解析，而不是像之前一样直接 500
+  // - 表单模式（FORM: 开头）：application/x-www-form-urlencoded
   app.post("/push", async (context) => {
-    const body = await readJson<RequestBody>(context.req.raw);
-    return handlePush(gateway, {
-      to: body.to,
-      title: body.title,
-      body: body.body ?? body.content ?? body.message,
-    });
+    const request = context.req.raw;
+    const raw = await request.text();
+    let values: { to?: unknown; title?: unknown; body?: unknown };
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        values = {
+          to: (parsed as RequestBody).to,
+          title: (parsed as RequestBody).title,
+          body:
+            (parsed as RequestBody).body ??
+            (parsed as RequestBody).content ??
+            (parsed as RequestBody).message,
+        };
+      } else {
+        values = parseT3Text(raw);
+      }
+    } catch {
+      values = parseT3Text(raw);
+    }
+    return handlePush(gateway, values);
   });
 
   app.get("/push", (context) =>
@@ -209,6 +244,52 @@ function handlePathPush(
     },
     400,
   );
+}
+
+// 解析 T3 Lite 固件“自定义 Webhook”纯文本（或 GET 参数拼出的）默认模板：
+//   <短信内容>
+//   号码:13800138000
+//   时间:2026-10-24 13:00:00
+//   来源: SIM1 123456789012345
+//   运行时间: 1天2小时
+//   【设备名】短信
+// 把短信正文抽出来，补齐号码/卡槽后作为转发内容；识别不出 T3 格式则原样发送。
+function parseT3Text(raw: string): {
+  to?: string;
+  title?: string;
+  phone?: string;
+  body: string;
+} {
+  const text = (raw || "").trim();
+  if (!text) return { body: "" };
+
+  const isMeta = (l: string): boolean =>
+    /^(号码|时间|来源|运行时间|备注|事件)[:：]/.test(l) ||
+    /^(SIM|卡槽)/.test(l) ||
+    /^【.+】/.test(l);
+
+  const phoneMatch = text.match(/号码[:：]\s*([^\s]+)/);
+  const phone = phoneMatch ? phoneMatch[1].trim() : undefined;
+  const sourceMatch = text.match(/来源[:：]\s*(.+)/);
+  const slot = sourceMatch ? sourceMatch[1].trim() : undefined;
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  const contentLines: string[] = [];
+  for (const l of lines) {
+    if (isMeta(l)) break;
+    contentLines.push(l);
+  }
+  const content = contentLines.join("\n").trim() || text;
+
+  const extra: string[] = [];
+  if (phone) extra.push(`号码: ${phone}`);
+  if (slot) extra.push(`卡槽: ${slot}`);
+  const body = extra.length ? `${content}\n${extra.join("\n")}` : content;
+
+  return { body, phone, title: "" };
 }
 
 async function handlePush(
