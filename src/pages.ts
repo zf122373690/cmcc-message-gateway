@@ -225,7 +225,7 @@ export function adminPageHtml(): string {
       if(j.ok){
         $('cmccApiKey').value=''; $('apiToken').value=''; $('defaultRecipient').value='';
         if(j.connectError){
-          show($('msg_save'),'已保存 ✅\n⚠ 但重新对接失败：'+j.connectError+'\n（配置已生效，连接会自动重试；也可点上方“一键对接”手动重试）','ok');
+          show($('msg_save'),'已保存 ✅\\n⚠ 但重新对接失败：'+j.connectError+'\\n（配置已生效，连接会自动重试；也可点上方“一键对接”手动重试）','ok');
         }else{
           show($('msg_save'),'已保存并重新对接 ✅','ok');
         }
@@ -254,9 +254,9 @@ export function adminPageHtml(): string {
       const r=await fetch('/api/test-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to, content:$('testContent').value})});
       const j=await r.json();
       if(j.ok){
-        if(j.notice) show($('msg_test'),'✅ 已发送，平台回执：\n'+j.notice,'ok');
+        if(j.notice) show($('msg_test'),'✅ 已发送，平台回执：\\n'+j.notice,'ok');
         else show($('msg_test'),'✅ 已发送（已写入通道，未实时收到平台回执，请查收手机）：messageId='+(j.messageId||''),'ok');
-      } else show($('msg_test'),'❌ 发送失败：'+(j.message||'未知错误')+'\n连接:'+(j.connected?'已连':'未连')+' 认证:'+(j.authenticated?'已认证':'未认证'),'err');
+      } else show($('msg_test'),'❌ 发送失败：'+(j.message||'未知错误')+'\\n连接:'+(j.connected?'已连':'未连')+' 认证:'+(j.authenticated?'已认证':'未认证'),'err');
     }catch(e){ show($('msg_test'),'发送失败：网络错误','err'); }
   };
 
