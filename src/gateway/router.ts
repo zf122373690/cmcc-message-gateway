@@ -6,6 +6,7 @@ import {
   INBOX_KEY,
   LAST_FRAME_KEY,
   MAX_INBOX,
+  RECENT_FRAMES_KEY,
   RECIPIENT_KEY,
 } from "../constants.js";
 import { decodePathPart, errorMessage, json, readJson } from "../http.js";
@@ -101,12 +102,17 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
     inboxResponse(gateway, context.req.query("limit")),
   );
 
-  app.all("/api/debug/last-frame", async () =>
-    json({
+  app.all("/api/debug/last-frame", async () => {
+    const stored =
+      (await gateway.state.storage.get<{ receivedAt: number; frame: unknown }[]>(
+        RECENT_FRAMES_KEY,
+      )) || [];
+    return json({
       ok: true,
       frame: (await gateway.state.storage.get(LAST_FRAME_KEY)) || null,
-    }),
-  );
+      frames: stored.slice(-10),
+    });
+  });
 
   // 兼容 T3 Lite 固件“自定义 Webhook”的原生提交方式：
   // - JSON 模式（customBody 以 JSON: 开头）：body 为合法 JSON，按 title/body 解析

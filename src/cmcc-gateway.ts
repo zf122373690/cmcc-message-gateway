@@ -5,6 +5,7 @@ import {
   DEFAULT_CMCC_SERVER,
   DEFAULT_CMCC_UPLOAD,
   DEFAULT_CMCC_VERSION,
+  RECENT_FRAMES_KEY,
 } from "./constants.js";
 import type { Bindings } from "./env.js";
 import type { GatewayConfig } from "./config.js";
@@ -29,6 +30,8 @@ export class CmccGateway extends DurableObject<Bindings> {
   lastError: string | null = null;
   // 平台最近推送的通知/回执文本（如“设备暂未在线”等），用于对接诊断展示
   lastNotice: { text: string; at: number } | null = null;
+  // 最近若干入站帧原文（内存态，仅用于对接诊断，DO 重启即清空）
+  recentFrames: { receivedAt: number; frame: unknown }[] = [];
   // 当前 WebSocket 连接是用哪个 API Key 建立的（K 变更后需要重连才生效）
   connectedApiKey: string | null = null;
 
@@ -50,6 +53,11 @@ export class CmccGateway extends DurableObject<Bindings> {
       if (alarm == null) {
         await this.state.storage.setAlarm(Date.now() + 30_000);
       }
+      // 帧历史持久化在 DO 存储中，重启/休眠后不丢（用于抓平台语音帧等诊断）
+      const saved = await this.state.storage.get<{ receivedAt: number; frame: unknown }[]>(
+        RECENT_FRAMES_KEY,
+      );
+      if (Array.isArray(saved)) this.recentFrames = saved;
       await this.loadConfig();
     });
   }

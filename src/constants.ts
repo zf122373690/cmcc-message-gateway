@@ -7,4 +7,6 @@ export const DEFAULT_CMCC_VERSION = "2.0";
 export const RECIPIENT_KEY = "currentRecipient";
 export const INBOX_KEY = "inbox";
 export const LAST_FRAME_KEY = "lastServerFrame";
+export const RECENT_FRAMES_KEY = "recentFrames";
+export const MAX_RECENT_FRAMES = 20;
 export const MAX_INBOX = 100;

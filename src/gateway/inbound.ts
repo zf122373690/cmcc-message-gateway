@@ -1,5 +1,9 @@
 import type { CmccGateway } from "../cmcc-gateway.js";
-import { LAST_FRAME_KEY } from "../constants.js";
+import {
+  LAST_FRAME_KEY,
+  MAX_RECENT_FRAMES,
+  RECENT_FRAMES_KEY,
+} from "../constants.js";
 import { errorMessage } from "../http.js";
 import {
   isCmccFrame,
@@ -25,6 +29,12 @@ export async function handleWebSocketMessage(
     receivedAt: Date.now(),
     frame: sanitizeFrame(parsed),
   });
+
+  // 同时保留最近若干帧原文（含不被识别的类型，如平台语音帧），
+  // 持久化在 DO 存储中（重启/休眠不丢），供 /api/debug/last-frame 抓真实帧结构
+  gateway.recentFrames.push({ receivedAt: Date.now(), frame: sanitizeFrame(parsed) });
+  if (gateway.recentFrames.length > MAX_RECENT_FRAMES) gateway.recentFrames.shift();
+  await gateway.state.storage.put(RECENT_FRAMES_KEY, gateway.recentFrames);
 
   if (!isCmccFrame(parsed)) return;
 
