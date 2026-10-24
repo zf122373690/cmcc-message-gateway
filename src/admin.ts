@@ -95,8 +95,7 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
   });
 
   app.post("/logout", async (c) => {
-    const token = sessionToken(c);
-    await destroySession(c.env, token);
+    await destroySession();
     deleteCookie(c, SESSION_COOKIE, {
       path: "/",
       httpOnly: true,
@@ -185,8 +184,12 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
         return json({ ok: false, message: "新密码至少 6 位" }, 400);
       }
       await updatePassword(c.env, rec.user, body.newpass);
-      const token = sessionToken(c);
-      await destroySession(c.env, token);
+      await destroySession();
+      deleteCookie(c, SESSION_COOKIE, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
+      });
       return json({ ok: true });
     } catch (error) {
       return json(

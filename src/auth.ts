@@ -85,18 +85,45 @@ export async function updatePassword(
   await kv.put(KV_ADMIN, JSON.stringify(record));
 }
 
+// 会话采用「签名 Cookie」而非 KV 存储：
+// 登录后把 `user.exp` 用 HMAC-SHA256 签名写入 Cookie，后端本地验签即可，
+// 彻底规避 Cloudflare KV 写入后读取的最终一致性延迟（否则紧邻请求常读不到 session 而 401）。
+
+const DEFAULT_SESSION_SECRET = "cmcc-gw-session-v1-fixed";
+
+function getSessionSecret(env: Bindings): string {
+  return env.SESSION_SECRET?.trim() || DEFAULT_SESSION_SECRET;
+}
+
+function encBuf(s: string): ArrayBuffer {
+  const u = new TextEncoder().encode(s);
+  const ab = new ArrayBuffer(u.byteLength);
+  new Uint8Array(ab).set(u);
+  return ab;
+}
+
+async function hmacHex(secret: string, data: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encBuf(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, encBuf(data));
+  return Array.from(new Uint8Array(sig), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 export async function createSession(
   env: Bindings,
   user: string,
 ): Promise<string> {
-  const kv = env.CONFIG;
-  if (!kv) throw new Error("CONFIG KV 未绑定");
-  const token = randomHex(24);
-  const record: SessionRecord = { user, exp: Date.now() + SESSION_TTL_SECONDS * 1000 };
-  await kv.put(`session:${token}`, JSON.stringify(record), {
-    expirationTtl: SESSION_TTL_SECONDS,
-  });
-  return token;
+  const exp = Date.now() + SESSION_TTL_SECONDS * 1000;
+  const payload = `${user}.${exp}`;
+  const sig = await hmacHex(getSessionSecret(env), payload);
+  return `${payload}.${sig}`;
 }
 
 export async function readSession(
@@ -104,30 +131,23 @@ export async function readSession(
   token: string | undefined,
 ): Promise<SessionRecord | null> {
   if (!token) return null;
-  const kv = env.CONFIG;
-  if (!kv) return null;
-  const raw = await kv.get(`session:${token}`);
-  if (!raw) return null;
-  try {
-    const rec = JSON.parse(raw) as SessionRecord;
-    if (rec.exp && rec.exp < Date.now()) {
-      await kv.delete(`session:${token}`);
-      return null;
-    }
-    return rec;
-  } catch {
-    return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [user, expStr, sig] = parts;
+  const expected = await hmacHex(getSessionSecret(env), `${user}.${expStr}`);
+  if (expected.length !== sig.length) return null;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
   }
+  if (diff !== 0) return null;
+  const exp = Number(expStr);
+  if (!Number.isFinite(exp) || exp < Date.now()) return null;
+  return { user, exp };
 }
 
-export async function destroySession(
-  env: Bindings,
-  token: string | undefined,
-): Promise<void> {
-  if (!token) return;
-  const kv = env.CONFIG;
-  if (!kv) return;
-  await kv.delete(`session:${token}`);
+export async function destroySession(): Promise<void> {
+  // 会话为签名 Cookie，退出时由客户端清除 Cookie，无需服务端删除
 }
 
 export function parseCookies(header: string | undefined): Record<string, string> {

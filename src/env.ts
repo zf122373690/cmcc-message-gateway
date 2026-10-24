@@ -13,6 +13,7 @@ export interface Bindings {
   INBOUND_WEBHOOK_TOKEN?: string;
   ADMIN_USER?: string;
   ADMIN_PASS?: string;
+  SESSION_SECRET?: string;
 }
 
 export interface HonoEnv {
