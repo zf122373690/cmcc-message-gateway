@@ -65,8 +65,13 @@ export async function handleWebSocketMessage(
   if (["text_message", "media_message", "message"].includes(type)) {
     const sender = String(parsed.from || parsed.phone || "").trim();
 
-    // CMCC 的某些状态回包也叫 message，但没有 from，不能覆盖接收人。
-    if (!sender) return;
+    // CMCC 的某些状态回包也叫 message，但没有 from（如“设备暂未在线”等通知），
+    // 这类帧不是入站消息，提取文本作为平台通知，供对接诊断展示。
+    if (!sender) {
+      const notice = extractNoticeText(parsed);
+      if (notice) gateway.lastNotice = { text: notice, at: Date.now() };
+      return;
+    }
 
     const message = normalizeInbound(parsed, sender);
     await setAutoRecipient(gateway, message);
@@ -75,6 +80,12 @@ export async function handleWebSocketMessage(
     if (gateway.bindings.INBOUND_WEBHOOK_URL) {
       gateway.state.waitUntil(deliverWebhook(gateway, message));
     }
+  }
+
+  // 其余未被上述分支识别的帧（平台状态/回执），提取可读文本作为平台最近通知
+  const fallbackNotice = extractNoticeText(parsed);
+  if (fallbackNotice) {
+    gateway.lastNotice = { text: fallbackNotice, at: Date.now() };
   }
 }
 
@@ -128,5 +139,20 @@ async function deliverWebhook(
     });
   } catch (error) {
     gateway.lastError = `Inbound webhook: ${errorMessage(error)}`;
+  }
+}
+
+// 从平台帧中提取可读文本，用于对接诊断展示（如“设备暂未在线”等回执）。
+function extractNoticeText(frame: unknown): string | null {
+  const f = frame as Record<string, unknown>;
+  const text = String(
+    f.content ?? f.text ?? f.message ?? f.reason ?? f.desc ?? f.detail ?? "",
+  ).trim();
+  if (text) return text.slice(0, 500);
+  try {
+    const summary = JSON.stringify(sanitizeFrame(frame));
+    return summary.length > 500 ? summary.slice(0, 500) : summary;
+  } catch {
+    return null;
   }
 }

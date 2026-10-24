@@ -129,6 +129,56 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
     });
   });
 
+  // 测试发送：真实向中国移动通道发送一条文本消息，并等待约 4 秒采集平台回执，
+  // 用于验证对接链路是否真正可用（如“设备暂未在线”等回执会被如实返回）。
+  app.post("/api/test-send", async (context) => {
+    let to = "";
+    let content = "";
+    try {
+      const body = await readJson<RequestBody>(context.req.raw);
+      to = String(body.to || "");
+      content = String(body.content || body.body || "");
+    } catch {
+      // 允许空 body，下面会校验
+    }
+    if (!to.trim()) {
+      return json(
+        {
+          ok: false,
+          connected: gateway.isOpen(),
+          authenticated: gateway.authenticated,
+          message: "请填写接收手机号/接收人",
+        },
+        400,
+      );
+    }
+    const text = content.trim() || "【测试】CMCC 短信转发对接测试，收到请忽略。";
+    try {
+      const recipient = await requireRecipient(gateway, to);
+      const t0 = Date.now();
+      const messageId = await sendText(gateway, recipient.id, text);
+      const notice = await collectNoticeAfter(gateway, t0, 4000);
+      return json({
+        ok: true,
+        messageId,
+        connected: gateway.isOpen(),
+        authenticated: gateway.authenticated,
+        notice: notice || null,
+        status: notice ? "platform_notice" : "ws_written",
+      });
+    } catch (error) {
+      return json(
+        {
+          ok: false,
+          connected: gateway.isOpen(),
+          authenticated: gateway.authenticated,
+          message: errorMessage(error),
+        },
+        400,
+      );
+    }
+  });
+
   app.post("/api/media/send", async (context) =>
     handleMediaSend(
       gateway,
@@ -186,6 +236,7 @@ async function healthResponse(gateway: CmccGateway): Promise<Response> {
     lastDisconnectAt: gateway.lastDisconnectAt || null,
     lastPongAt: gateway.lastPongAt || null,
     lastError: gateway.lastError,
+    lastNotice: gateway.lastNotice,
     timestamp: Date.now(),
   });
 }
@@ -400,4 +451,21 @@ function successResponse(
       ...extraData,
     },
   });
+}
+
+// 发送后等待平台回执：轮询 gateway.lastNotice，若收到发送之后新增的通知则返回其文本。
+// 平台回执（如“设备暂未在线”）通过 WebSocket 异步推回，此处最多等待 timeoutMs。
+async function collectNoticeAfter(
+  gateway: CmccGateway,
+  sinceTs: number,
+  timeoutMs: number,
+): Promise<string | null> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (gateway.lastNotice && gateway.lastNotice.at >= sinceTs) {
+      return gateway.lastNotice.text;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return null;
 }

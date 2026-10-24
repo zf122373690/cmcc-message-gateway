@@ -3,7 +3,7 @@
 import type { Hono } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import type { Bindings, HonoEnv } from "./env.js";
-import { json } from "./http.js";
+import { json, errorMessage } from "./http.js";
 import {
   KV_ADMIN,
   loadConfigKV,
@@ -28,8 +28,20 @@ function getStub(env: Bindings) {
   return env.CMCC_GATEWAY.get(id);
 }
 
-async function doFetch(env: Bindings, path: string): Promise<Response> {
-  return getStub(env).fetch(new Request(`https://cmcc.internal${path}`));
+async function doFetch(
+  env: Bindings,
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  const init: RequestInit =
+    body !== undefined
+      ? {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      : { method: "GET" };
+  return getStub(env).fetch(new Request(`https://cmcc.internal${path}`, init));
 }
 
 export function sessionToken(context: {
@@ -221,6 +233,31 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
         },
         500,
       );
+    }
+  });
+
+  app.post("/api/test-send", async (c) => {
+    try {
+      const body = (await c.req.json()) as { to?: string; content?: string };
+      if (!body.to || !body.to.trim()) {
+        return json({ ok: false, message: "请填写接收手机号/接收人" }, 400);
+      }
+      const r = await doFetch(c.env, "/api/test-send", {
+        to: body.to.trim(),
+        content: body.content || "",
+      });
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      return json({
+        ok: Boolean(j.ok),
+        messageId: j.messageId || null,
+        connected: Boolean(j.connected),
+        authenticated: Boolean(j.authenticated),
+        notice: j.notice || null,
+        message:
+          j.notice || j.message || (j.ok ? "已发送，请查收手机" : "发送失败"),
+      });
+    } catch (error) {
+      return json({ ok: false, message: errorMessage(error) }, 500);
     }
   });
 }

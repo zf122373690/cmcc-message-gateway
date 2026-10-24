@@ -27,6 +27,8 @@ export class CmccGateway extends DurableObject<Bindings> {
   lastConnectAt = 0;
   lastDisconnectAt = 0;
   lastError: string | null = null;
+  // 平台最近推送的通知/回执文本（如“设备暂未在线”等），用于对接诊断展示
+  lastNotice: { text: string; at: number } | null = null;
 
   // 来自 KV 的配置（网页后台可改），环境变量作为兜底
   config: GatewayConfig = {};

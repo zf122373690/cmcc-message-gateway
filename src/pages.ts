@@ -88,7 +88,8 @@ export function adminPageHtml(): string {
   .pill .v{font-size:15px; font-weight:600; margin-top:2px;}
   .v.ok{color:var(--ok);} .v.err{color:var(--err);} .v.mut{color:var(--mut);}
   label{display:block; font-size:13px; color:var(--mut); margin:14px 0 6px;}
-  input,select{width:100%; padding:12px 13px; border-radius:10px; border:1px solid var(--line); background:#0f1218; color:var(--fg); font-size:15px; outline:none;}
+  input,select,textarea{width:100%; padding:12px 13px; border-radius:10px; border:1px solid var(--line); background:#0f1218; color:var(--fg); font-size:15px; outline:none;}
+  textarea{resize:vertical; font-family:inherit;}
   input:focus{border-color:var(--acc);}
   .hint{font-size:12px; color:var(--mut); margin-top:5px;}
   .row{display:flex; gap:10px;}
@@ -119,6 +120,18 @@ export function adminPageHtml(): string {
       <button id="connect">一键对接</button>
     </div>
     <div class="msg" id="msg_status"></div>
+    <div class="msg" id="msg_notice" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>测试发送（验证对接）</h2>
+    <label>接收手机号 / 接收人</label>
+    <input id="testTo" placeholder="例如 13800138000（ClawBot 要发往的号码）">
+    <label>测试内容</label>
+    <textarea id="testContent" rows="3" placeholder="留空发送默认测试文案">【测试】CMCC 短信转发对接测试，收到请忽略。</textarea>
+    <button id="testSend">发送测试消息</button>
+    <div class="msg" id="msg_test"></div>
+    <div class="hint" id="hint_test">发送后会等待约 4 秒采集平台回执：若显示“设备暂未在线”等平台通知，说明对接通道已通但目标设备未上线；若显示“已发送，请查收”，则通道与设备均正常。</div>
   </div>
 
   <div class="card">
@@ -184,6 +197,9 @@ export function adminPageHtml(): string {
       setPill('st_auth', j.authenticated?'已认证':'未认证', j.authenticated?'ok':'err');
       setPill('st_rec', j.hasRecipient?'已设置':'未设置', j.hasRecipient?'ok':'mut');
       setPill('st_last', j.lastConnectAt?new Date(j.lastConnectAt).toLocaleString('zh-CN'):'—','mut');
+      const noticeEl=$('msg_notice');
+      if(j.lastNotice && j.lastNotice.text){ noticeEl.style.display='block'; noticeEl.textContent='平台最近通知：'+j.lastNotice.text; }
+      else { noticeEl.style.display='none'; }
       show($('msg_status'), j.lastError? ('最近错误：'+j.lastError):'状态已刷新', j.lastError?'err':'ok');
     }catch(e){ show($('msg_status'),'查询失败','err'); }
   }
@@ -220,6 +236,20 @@ export function adminPageHtml(): string {
       if(j.ok){ show($('msg_pw'),'密码已更新，请重新登录','ok'); setTimeout(()=>location.href='/login',1200); }
       else show($('msg_pw'), j.message||'更新失败','err');
     }catch(e){ show($('msg_pw'),'更新失败：网络错误','err'); }
+  };
+
+  $('testSend').onclick=async()=>{
+    const to=$('testTo').value.trim();
+    if(!to){ show($('msg_test'),'请先填写接收手机号/接收人','err'); return; }
+    show($('msg_test'),'发送中（等待平台回执约 4 秒）…');
+    try{
+      const r=await fetch('/api/test-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to, content:$('testContent').value})});
+      const j=await r.json();
+      if(j.ok){
+        if(j.notice) show($('msg_test'),'✅ 已发送，平台回执：\n'+j.notice,'ok');
+        else show($('msg_test'),'✅ 已发送（已写入通道，未实时收到平台回执，请查收手机）：messageId='+(j.messageId||''),'ok');
+      } else show($('msg_test'),'❌ 发送失败：'+(j.message||'未知错误')+'\n连接:'+(j.connected?'已连':'未连')+' 认证:'+(j.authenticated?'已认证':'未认证'),'err');
+    }catch(e){ show($('msg_test'),'发送失败：网络错误','err'); }
   };
 
   $('logout').onclick=async()=>{ await fetch('/logout',{method:'POST'}); location.href='/login'; };
