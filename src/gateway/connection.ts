@@ -35,11 +35,16 @@ async function connectInternal(gateway: CmccGateway): Promise<void> {
     .replace(/^wss:/i, "https:")
     .replace(/^ws:/i, "http:");
 
+  // Upstream handshake must carry a timeout: when the CMCC upstream stalls,
+  // a bare fetch hangs forever and drags the whole /push request with it
+  // (the firmware side then sees HTTP -11 read timeouts). 15s covers a
+  // normal handshake; timeouts fail fast so the alarm can retry sooner.
   const response = await fetch(upgradeUrl, {
     headers: {
       Upgrade: "websocket",
       "X-API-Key": gateway.cmccApiKey,
     },
+    signal: AbortSignal.timeout(15_000),
   });
 
   const ws = response.webSocket;

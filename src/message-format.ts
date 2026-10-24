@@ -141,3 +141,24 @@ export function inferMediaType(mime = ""): string {
 
   return "FILE";
 }
+
+/** 按 URL/文件名的扩展名推断媒体类型（浏览器对 .amr 等不一定给 MIME 时用） */
+export function inferMediaTypeFromUrl(urlOrName = ""): string {
+  const ext = String(urlOrName || "")
+    .split("?")[0]
+    .split("#")[0]
+    .split(".")
+    .pop()
+    ?.toLowerCase() ?? "";
+
+  if (["amr", "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac"].includes(ext))
+    return "AUDIO";
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "heic"].includes(ext))
+    return "IMAGE";
+  if (["mp4", "mov", "avi", "mkv", "webm", "3gp"].includes(ext))
+    return "VIDEO";
+  if (["txt", "md", "csv", "json", "xml", "html", "pdf"].includes(ext))
+    return "TEXT";
+
+  return "FILE";
+}

@@ -166,6 +166,41 @@ curl --get 'https://YOUR_DOMAIN/push' \
   --data-urlencode 'body=任务已执行完成'
 ```
 
+### 语音 / 媒体推送（复用 /push 同一个入口）
+
+`/push` 同时支持文本与媒体（语音、图片、视频、文件），无需切换到其他接口。
+
+**方式一：multipart 文件直传**（Worker 先上传到中国移动媒体服务，再发送）：
+
+```bash
+curl -X POST 'https://YOUR_DOMAIN/push' \
+  -H 'Authorization: Bearer YOUR_API_TOKEN' \
+  -F 'file=@./voice.amr' \
+  -F 'mediaType=AUDIO' \
+  -F 'content=语音附言（可选）'
+```
+
+表单字段：`file` 必填；`to`（覆盖默认接收人）、`mediaType`、`content` 可选。
+`mediaType` 省略时按文件 MIME 推断，MIME 缺失时按扩展名推断（`.amr`/`.mp3`/`.m4a`/`.aac`/`.wav` → `AUDIO`，`.jpg`/`.png` → `IMAGE`，`.mp4`/`.mov` → `VIDEO`）。
+
+**方式二：JSON 带 `mediaUrl`**（文件已在公网可访问）：
+
+```bash
+curl -X POST 'https://YOUR_DOMAIN/push' \
+  -H 'Authorization: Bearer YOUR_API_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mediaUrl": "https://example.com/voice.amr",
+    "mediaType": "AUDIO",
+    "content": "语音附言（可选）"
+  }'
+```
+
+`mediaType` 省略时按 `mediaUrl` 扩展名推断。GET 方式同样支持：
+`curl --get 'https://YOUR_DOMAIN/push' -H 'Authorization: Bearer YOUR_API_TOKEN' --data-urlencode 'mediaUrl=https://example.com/voice.amr' --data-urlencode 'mediaType=AUDIO'`。
+
+> 注意：中国移动平台对语音文件格式（如 AMR）与 `mediaType` 枚举的接受度需实测验证；发送成功仅表示已写入通道。
+
 ### 上传并发送媒体
 
 ```bash

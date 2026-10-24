@@ -10,7 +10,7 @@ import {
 } from "../constants.js";
 import { decodePathPart, errorMessage, json, readJson } from "../http.js";
 import type { InboundMessage } from "../message-format.js";
-import { inferMediaType } from "../message-format.js";
+import { inferMediaType, inferMediaTypeFromUrl } from "../message-format.js";
 import { ensureConnected, resetConnection } from "./connection.js";
 import { sendMedia, sendText, uploadMedia } from "./outbound.js";
 import type { Recipient } from "./recipients.js";
@@ -116,11 +116,29 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
   // - 表单模式（FORM: 开头）：application/x-www-form-urlencoded
   app.post("/push", async (context) => {
     const request = context.req.raw;
+    const contentType = request.headers.get("content-type") || "";
+
+    // 语音/图片/视频/文件：multipart 直传（与文本推送复用同一个 /push 入口，
+    // 表单字段：file 必填，to/mediaType/content/mediaFileName 可选）
+    if (contentType.includes("multipart/form-data")) {
+      return handleMediaUpload(gateway, request);
+    }
+
     const raw = await request.text();
     let values: { to?: unknown; title?: unknown; body?: unknown };
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        // JSON 带 mediaUrl：走媒体发送（如语音 AMR：
+        // {"mediaUrl":"https://.../voice.amr","mediaType":"AUDIO","content":"附言"}）
+        if ((parsed as RequestBody).mediaUrl) {
+          return handleMediaSend(gateway, {
+            ...(parsed as RequestBody),
+            mediaType:
+              (parsed as RequestBody).mediaType ||
+              inferMediaTypeFromUrl(String((parsed as RequestBody).mediaUrl)),
+          });
+        }
         values = {
           to: (parsed as RequestBody).to,
           title: (parsed as RequestBody).title,
@@ -138,17 +156,21 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
     return handlePush(gateway, values);
   });
 
-  app.get("/push", (context) =>
-    handlePush(gateway, {
-      to: context.req.query("to") || "",
-      title: context.req.query("title") || "",
-      body:
-        context.req.query("body") ||
-        context.req.query("content") ||
-        context.req.query("message") ||
-        "",
-    }),
-  );
+  app.get("/push", (context) => {
+    const query = context.req.query();
+    // 带 mediaUrl：媒体发送（如语音 ?mediaUrl=https://.../voice.amr&mediaType=AUDIO）
+    if (query.mediaUrl) {
+      return handleMediaSend(gateway, {
+        ...query,
+        mediaType: query.mediaType || inferMediaTypeFromUrl(query.mediaUrl),
+      });
+    }
+    return handlePush(gateway, {
+      to: query.to || "",
+      title: query.title || "",
+      body: query.body || query.content || query.message || "",
+    });
+  });
 
   // Hono 的 `*` 也会匹配空尾段，精确路由必须先注册。
   app.get("/push/*", (context) =>
@@ -445,9 +467,17 @@ async function handleMediaUpload(
 
   const recipient = await requireRecipient(gateway, form.get("to"));
   const uploaded = await uploadMedia(gateway, file);
+
+  // 媒体类型：表单显式指定 > 文件 MIME > 文件扩展名（浏览器对 .amr 等可能不给 MIME）
+  let mediaType = String(form.get("mediaType") || "").trim();
+  if (!mediaType) {
+    mediaType = inferMediaType(file.type);
+    if (mediaType === "FILE") mediaType = inferMediaTypeFromUrl(file.name || "");
+  }
+
   const result = await sendMedia(gateway, {
     to: recipient.id,
-    mediaType: String(form.get("mediaType") || inferMediaType(file.type)),
+    mediaType,
     content: String(form.get("content") || ""),
     mediaUrl: uploaded.mediaUrl,
     mediaFileName: file.name,

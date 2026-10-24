@@ -13,7 +13,7 @@ export default {
     ctx: ExecutionContext,
   ): void {
     const id = env.CMCC_GATEWAY.idFromName("default");
-    const stub = env.CMCC_GATEWAY.get(id);
+    const stub = env.CMCC_GATEWAY.get(id, { locationHint: "apac" });
     ctx.waitUntil(
       stub.fetch(new Request("https://cmcc.internal/connect")).then(() => {}),
     );

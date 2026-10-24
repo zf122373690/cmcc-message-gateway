@@ -7,7 +7,10 @@ import { registerAdminRoutes, requireSession } from "./admin.js";
 
 function getStub(env: Bindings): DurableObjectStub {
   const id = env.CMCC_GATEWAY.idFromName("default");
-  return env.CMCC_GATEWAY.get(id);
+  // Pin the DO to an Asia-Pacific colo. The default placement landed the
+  // gateway DO overseas, so requests from China intermittently stalled
+  // before even reaching it. Only takes effect when the DO is (re)created.
+  return env.CMCC_GATEWAY.get(id, { locationHint: "apac" });
 }
 
 const ADMIN_PATHS = [
