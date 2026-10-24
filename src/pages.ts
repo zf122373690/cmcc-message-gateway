@@ -91,6 +91,9 @@ export function adminPageHtml(): string {
   input,select,textarea{width:100%; padding:12px 13px; border-radius:10px; border:1px solid var(--line); background:#0f1218; color:var(--fg); font-size:15px; outline:none;}
   textarea{resize:vertical; font-family:inherit;}
   input:focus{border-color:var(--acc);}
+  .fieldrow{display:flex; gap:8px; align-items:stretch;}
+  .fieldrow input{flex:1; min-width:0;}
+  .fieldrow .copybtn{width:auto; margin:0; padding:12px 14px; font-size:13px; white-space:nowrap; background:#2a2f3a;}
   .hint{font-size:12px; color:var(--mut); margin-top:5px;}
   .row{display:flex; gap:10px;}
   .row button{flex:1;}
@@ -106,6 +109,27 @@ export function adminPageHtml(): string {
 <body>
   <div class="top"><h1>控制台</h1><button class="ghost" id="logout">退出</button></div>
   <div id="banner" class="banner" style="display:none"></div>
+
+  <div class="card">
+    <h2>渠道配置</h2>
+    <label>中国移动 API Key（K）</label>
+    <input id="cmccApiKey" placeholder="ak_ 开头，留空表示不修改">
+    <div class="hint" id="hint_k">当前：未设置</div>
+
+    <label>设备接入令牌（API Token / T3 的 key1）</label>
+    <div class="fieldrow">
+      <input id="apiToken" placeholder="留空表示不修改；T3 自定义通道的密钥1需与此一致">
+      <button type="button" class="copybtn" id="copyToken">复制</button>
+    </div>
+    <div class="hint" id="hint_t">当前：未设置</div>
+
+    <label>默认接收人（可选）</label>
+    <input id="defaultRecipient" placeholder="手机号；留空则用“手机给 ClawBot 发消息”自动记录">
+    <div class="hint" id="hint_r">当前：未设置</div>
+
+    <button id="save">保存配置</button>
+    <div class="msg" id="msg_save"></div>
+  </div>
 
   <div class="card">
     <h2>运行状态</h2>
@@ -124,32 +148,22 @@ export function adminPageHtml(): string {
   </div>
 
   <div class="card">
+    <h2>T3 设备对接说明</h2>
+    <div class="sec">在 T3「推送设置 → 自定义」通道填写：</div>
+    <div class="sec">• URL：<code id="url_push">/push</code></div>
+    <div class="sec">• 密钥1（key1）：点上方“设备接入令牌”右侧的「复制」按钮</div>
+    <div class="sec">• 自定义消息体（纯文本，无需 JSON）：</div>
+    <div class="sec"><code>{{短信内容}}</code></div>
+    <div class="sec" style="margin-top:8px">首次需先在手机「新消息 ClawBot」发一条消息以记录默认接收人。</div>
+  </div>
+
+  <div class="card">
     <h2>测试发送（验证对接）</h2>
-    <label>接收手机号 / 接收人</label>
-    <input id="testTo" placeholder="例如 13800138000（ClawBot 要发往的号码）">
     <label>测试内容</label>
     <textarea id="testContent" rows="3" placeholder="留空发送默认测试文案">【测试】CMCC 短信转发对接测试，收到请忽略。</textarea>
     <button id="testSend">发送测试消息</button>
     <div class="msg" id="msg_test"></div>
-    <div class="hint" id="hint_test">发送后会等待约 4 秒采集平台回执：若显示“设备暂未在线”等平台通知，说明对接通道已通但目标设备未上线；若显示“已发送，请查收”，则通道与设备均正常。</div>
-  </div>
-
-  <div class="card">
-    <h2>渠道配置</h2>
-    <label>中国移动 API Key（K）</label>
-    <input id="cmccApiKey" placeholder="ak_ 开头，留空表示不修改">
-    <div class="hint" id="hint_k">当前：未设置</div>
-
-    <label>设备接入令牌（API Token / T3 的 key1）</label>
-    <input id="apiToken" placeholder="留空表示不修改；T3 自定义通道的密钥1需与此一致">
-    <div class="hint" id="hint_t">当前：未设置</div>
-
-    <label>默认接收人（可选）</label>
-    <input id="defaultRecipient" placeholder="手机号；留空则用“手机给 ClawBot 发消息”自动记录">
-    <div class="hint" id="hint_r">当前：未设置</div>
-
-    <button id="save">保存配置</button>
-    <div class="msg" id="msg_save"></div>
+    <div class="hint" id="hint_test">发送到默认接收人（未设置时请先在上方“渠道配置”填写，或让手机向 ClawBot 发一条消息自动记录）。发送后等待约 4 秒采集平台回执：若显示“设备暂未在线”等平台通知，说明对接通道已通但目标设备未上线；若显示“已发送，请查收”，则通道与设备均正常。</div>
   </div>
 
   <div class="card">
@@ -162,27 +176,19 @@ export function adminPageHtml(): string {
     <div class="msg" id="msg_pw"></div>
   </div>
 
-  <div class="card">
-    <h2>T3 设备对接说明</h2>
-    <div class="sec">在 T3「推送设置 → 自定义」通道填写：</div>
-    <div class="sec">• URL：<code id="url_push">/push</code></div>
-    <div class="sec">• 密钥1（key1）：上面的“设备接入令牌”</div>
-    <div class="sec">• 自定义消息体（纯文本，无需 JSON）：</div>
-    <div class="sec"><code>{{短信内容}}</code></div>
-    <div class="sec" style="margin-top:8px">首次需先在手机「新消息 ClawBot」发一条消息以记录默认接收人。</div>
-  </div>
-
 <script>
   const $=(id)=>document.getElementById(id);
   function show(el,text,cls){ el.className='msg '+(cls||''); el.textContent=text; }
   function mask(v){ if(!v) return '未设置'; return v.length>10? v.slice(0,6)+'••••••': '••••'; }
 
+  let realToken='';
   async function load(){
     try{
       const r=await fetch('/api/settings'); const j=await r.json();
       if(!j.ok){ if(r.status===401){ location.href='/login'; return; } return; }
       $('hint_k').textContent='当前：'+mask(j.cmccApiKeySet?j.cmccApiKey:'');
       $('hint_t').textContent='当前：'+mask(j.apiTokenSet?j.apiToken:'');
+      realToken=j.apiTokenRaw||'';
       $('hint_r').textContent='当前：'+(j.defaultRecipient||'未设置');
       if(j.forceReset) $('banner').style.display='block', $('banner').textContent='⚠ 当前为默认密码 admin/admin123，请先在下方修改密码。';
       $('url_push').textContent=location.origin+'/push';
@@ -216,6 +222,20 @@ export function adminPageHtml(): string {
     }catch(e){ show($('msg_status'),'对接失败：网络错误','err'); }
   };
 
+  $('copyToken').onclick=async()=>{
+    if(!realToken){ show($('msg_save'),'尚未设置设备接入令牌，请先填写并保存后再复制','err'); return; }
+    let ok=false;
+    try{ await navigator.clipboard.writeText(realToken); ok=true; }
+    catch(e){
+      const ta=document.createElement('textarea'); ta.value=realToken; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select();
+      try{ document.execCommand('copy'); ok=true; }catch(_){}
+      document.body.removeChild(ta);
+    }
+    if(ok){ $('copyToken').textContent='已复制 ✓'; setTimeout(()=>{ $('copyToken').textContent='复制'; },1500); }
+    else show($('msg_save'),'复制失败，请手动长按令牌输入框复制','err');
+  };
+
   $('save').onclick=async()=>{
     const body={ cmccApiKey:$('cmccApiKey').value.trim(), apiToken:$('apiToken').value.trim(), defaultRecipient:$('defaultRecipient').value.trim() };
     show($('msg_save'),'保存中（保存后会立即重连，最多约 10 秒）…');
@@ -247,11 +267,9 @@ export function adminPageHtml(): string {
   };
 
   $('testSend').onclick=async()=>{
-    const to=$('testTo').value.trim();
-    if(!to){ show($('msg_test'),'请先填写接收手机号/接收人','err'); return; }
-    show($('msg_test'),'发送中（等待平台回执约 4 秒）…');
+    show($('msg_test'),'发送中（发送到默认接收人，等待平台回执约 4 秒）…');
     try{
-      const r=await fetch('/api/test-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to, content:$('testContent').value})});
+      const r=await fetch('/api/test-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:$('testContent').value})});
       const j=await r.json();
       if(j.ok){
         if(j.notice) show($('msg_test'),'✅ 已发送，平台回执：\\n'+j.notice,'ok');

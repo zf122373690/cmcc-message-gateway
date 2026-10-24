@@ -131,6 +131,8 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
       cmccApiKey: maskSecret(cmccApiKey),
       cmccApiKeySet: Boolean(cmccApiKey),
       apiToken: maskSecret(apiToken),
+      // 真实令牌仅返回给已登录的后台会话，用于「一键复制」填写到 T3 的 key1
+      apiTokenRaw: apiToken,
       apiTokenSet: Boolean(apiToken),
       defaultRecipient,
       forceReset: Boolean(admin?.forceReset),
@@ -250,11 +252,9 @@ export function registerAdminRoutes(app: Hono<HonoEnv>): void {
   app.post("/api/test-send", async (c) => {
     try {
       const body = (await c.req.json()) as { to?: string; content?: string };
-      if (!body.to || !body.to.trim()) {
-        return json({ ok: false, message: "请填写接收手机号/接收人" }, 400);
-      }
+      // to 可留空：留空由 DO 使用默认接收人（配置的或自动记录的）
       const r = await doFetch(c.env, "/api/test-send", {
-        to: body.to.trim(),
+        to: (body.to || "").trim(),
         content: body.content || "",
       });
       const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;

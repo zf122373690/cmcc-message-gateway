@@ -176,17 +176,8 @@ export function createGatewayApp(gateway: CmccGateway): Hono {
     } catch {
       // 允许空 body，下面会校验
     }
-    if (!to.trim()) {
-      return json(
-        {
-          ok: false,
-          connected: gateway.isOpen(),
-          authenticated: gateway.authenticated,
-          message: "请填写接收手机号/接收人",
-        },
-        400,
-      );
-    }
+    // to 可留空：留空时使用默认接收人（后台配置的，或手机向 ClawBot 发消息自动记录的）；
+    // 若两者都没有，requireRecipient 会抛出明确错误，由下方 catch 返回。
     const text = content.trim() || "【测试】CMCC 短信转发对接测试，收到请忽略。";
     try {
       const recipient = await requireRecipient(gateway, to);
